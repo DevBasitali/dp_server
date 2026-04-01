@@ -1,0 +1,229 @@
+// schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  owner
+  branch_manager
+  vendor
+}
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  name          String    @db.VarChar(100)
+  email         String    @unique @db.VarChar(150)
+  password_hash String    @db.Text
+  role          Role
+  branch_id     String?   @db.Uuid
+  vendor_id     String?   @db.Uuid
+  is_active     Boolean   @default(true)
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  // Relations
+  branch        Branch?   @relation("BranchManager", fields: [branch_id], references: [id])
+  vendor        Vendor?   @relation(fields: [vendor_id], references: [id])
+  
+  purchases_recorded  Purchase[] @relation("RecordedBy")
+  payments_entered    PaymentInstallment[] @relation("PaymentEnteredBy")
+  payments_deleted    PaymentInstallment[] @relation("PaymentDeletedBy")
+  payment_edits       PaymentEditLog[]
+  inventory_requests  InventoryRequest[]
+  daily_sales         DailySale[]
+  audit_logs          AuditLog[]
+}
+
+model Branch {
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String   @db.VarChar(100)
+  location   String?  @db.Text
+  manager_id String?  @db.Uuid
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  managers             User[]   @relation("BranchManager")
+  vendor_links         VendorBranchLink[]
+  purchases            Purchase[]
+  inventory_requests   InventoryRequest[]
+  daily_sales          DailySale[]
+}
+
+model Vendor {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String   @db.VarChar(100)
+  phone           String?  @db.VarChar(20)
+  whatsapp_number String   @db.VarChar(20)
+  category        String?  @db.VarChar(100)
+  notes           String?  @db.Text
+  is_active       Boolean  @default(true)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  // Relations
+  users           User[]
+  branch_links    VendorBranchLink[]
+  items           Item[]
+  purchases       Purchase[]
+  inventory_requests InventoryRequest[]
+}
+
+model VendorBranchLink {
+  id         String   @id @default(uuid()) @db.Uuid
+  vendor_id  String   @db.Uuid
+  branch_id  String   @db.Uuid
+  created_at DateTime @default(now())
+
+  vendor     Vendor   @relation(fields: [vendor_id], references: [id])
+  branch     Branch   @relation(fields: [branch_id], references: [id])
+}
+
+model Item {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String   @db.VarChar(150)
+  category       String?  @db.VarChar(100)
+  vendor_id      String   @db.Uuid
+  cost_price     Decimal  @db.Decimal(10, 2)
+  selling_price  Decimal  @db.Decimal(10, 2)
+  margin         Decimal  @db.Decimal(10, 2)
+  margin_percent Decimal  @db.Decimal(5, 2)
+  is_active      Boolean  @default(true)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  vendor         Vendor   @relation(fields: [vendor_id], references: [id])
+  purchase_items PurchaseItem[]
+}
+
+model Purchase {
+  id                String   @id @default(uuid()) @db.Uuid
+  vendor_id         String   @db.Uuid
+  branch_id         String   @db.Uuid
+  total_amount      Decimal  @db.Decimal(12, 2)
+  total_paid        Decimal  @db.Decimal(12, 2) @default(0)
+  balance_remaining Decimal  @db.Decimal(12, 2)
+  purchase_date     DateTime @db.Date
+  invoice_number    String?  @db.VarChar(100)
+  notes             String?  @db.Text
+  recorded_by       String   @db.Uuid
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  vendor            Vendor   @relation(fields: [vendor_id], references: [id])
+  branch            Branch   @relation(fields: [branch_id], references: [id])
+  recorder          User     @relation("RecordedBy", fields: [recorded_by], references: [id])
+  
+  items             PurchaseItem[]
+  payments          PaymentInstallment[]
+}
+
+model PurchaseItem {
+  id                    String   @id @default(uuid()) @db.Uuid
+  purchase_id           String   @db.Uuid
+  item_id               String   @db.Uuid
+  item_name             String   @db.VarChar(150)
+  quantity              Int
+  cost_price_at_purchase Decimal @db.Decimal(10, 2)
+  line_total            Decimal  @db.Decimal(12, 2)
+  created_at            DateTime @default(now())
+
+  purchase              Purchase @relation(fields: [purchase_id], references: [id])
+  item                  Item     @relation(fields: [item_id], references: [id])
+}
+
+model PaymentInstallment {
+  id            String   @id @default(uuid()) @db.Uuid
+  purchase_id   String   @db.Uuid
+  amount        Decimal  @db.Decimal(12, 2)
+  payment_date  DateTime @db.Date
+  note          String?  @db.Text
+  entered_by    String   @db.Uuid
+  is_deleted    Boolean  @default(false)
+  deleted_by    String?  @db.Uuid
+  deleted_at    DateTime?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  purchase      Purchase @relation(fields: [purchase_id], references: [id])
+  enterer       User     @relation("PaymentEnteredBy", fields: [entered_by], references: [id])
+  deleter       User?    @relation("PaymentDeletedBy", fields: [deleted_by], references: [id])
+  
+  edit_logs     PaymentEditLog[]
+}
+
+model PaymentEditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  payment_id    String   @db.Uuid
+  edited_by     String   @db.Uuid
+  field_changed String   @db.VarChar(50)
+  old_value     String?  @db.Text
+  new_value     String?  @db.Text
+  edited_at     DateTime @default(now())
+
+  payment       PaymentInstallment @relation(fields: [payment_id], references: [id])
+  editor        User               @relation(fields: [edited_by], references: [id])
+}
+
+model InventoryRequest {
+  id               String   @id @default(uuid()) @db.Uuid
+  branch_id        String   @db.Uuid
+  vendor_id        String   @db.Uuid
+  requested_by     String   @db.Uuid
+  whatsapp_sent    Boolean  @default(false)
+  whatsapp_sent_at DateTime?
+  notes            String?  @db.Text
+  created_at       DateTime @default(now())
+
+  branch           Branch   @relation(fields: [branch_id], references: [id])
+  vendor           Vendor   @relation(fields: [vendor_id], references: [id])
+  requester        User     @relation(fields: [requested_by], references: [id])
+  
+  items            InventoryRequestItem[]
+}
+
+model InventoryRequestItem {
+  id            String   @id @default(uuid()) @db.Uuid
+  request_id    String   @db.Uuid
+  item_name     String   @db.VarChar(150)
+  quantity      Int
+  created_at    DateTime @default(now())
+
+  request       InventoryRequest @relation(fields: [request_id], references: [id])
+}
+
+model DailySale {
+  id                 String   @id @default(uuid()) @db.Uuid
+  branch_id          String   @db.Uuid
+  entered_by         String   @db.Uuid
+  sale_date          DateTime @db.Date
+  total_sales_amount Decimal  @db.Decimal(12, 2)
+  notes              String?  @db.Text
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  branch             Branch   @relation(fields: [branch_id], references: [id])
+  enterer            User     @relation(fields: [entered_by], references: [id])
+
+  @@unique([branch_id, sale_date])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  user_id     String   @db.Uuid
+  action      String   @db.VarChar(100)
+  entity_type String   @db.VarChar(50)
+  entity_id   String   @db.Uuid
+  description String?  @db.Text
+  ip_address  String?  @db.VarChar(45)
+  created_at  DateTime @default(now())
+
+  user        User     @relation(fields: [user_id], references: [id])
+}
