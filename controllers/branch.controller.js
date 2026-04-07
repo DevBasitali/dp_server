@@ -1,101 +1,46 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const branchService = require('../services/branch.service');
 
-// List all branches (Owner)
-exports.listBranches = async (req, res) => {
+exports.listBranches = async (req, res, next) => {
   try {
-    const branches = await prisma.branch.findMany({
-      include: {
-        managers: {
-          select: { id: true, name: true, email: true }
-        }
-      }
-    });
+    const branches = await branchService.listBranches();
     res.json({ success: true, data: branches, message: 'Branches retrieved successfully' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+  } catch (err) {
+    next(err);
   }
 };
 
-// Create a new branch (Owner)
-exports.createBranch = async (req, res) => {
+exports.createBranch = async (req, res, next) => {
   try {
-    const { name, location, manager_id } = req.body;
-    const branch = await prisma.branch.create({
-      data: { name, location, manager_id }
-    });
-    
-    // If manager_id provided, update the user to link them to this branch
-    if (manager_id) {
-        await prisma.user.update({
-            where: { id: manager_id },
-            data: { branch_id: branch.id }
-        });
-    }
-
+    const branch = await branchService.createBranch(req.body);
     res.status(201).json({ success: true, data: branch, message: 'Branch created' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+  } catch (err) {
+    next(err);
   }
 };
 
-// Get single branch (Owner, or Manager of this branch)
-exports.getBranch = async (req, res) => {
+exports.getBranch = async (req, res, next) => {
   try {
-    const branchId = req.params.id;
-    
-    // Auth check: If branch_manager, ensure they are requesting their own branch
-    if (req.user.role === 'branch_manager' && req.user.branchId !== branchId) {
-        return res.status(403).json({ success: false, message: 'Access denied to other branches' });
-    }
-
-    const branch = await prisma.branch.findUnique({
-      where: { id: branchId },
-      include: {
-        managers: {
-          select: { id: true, name: true, email: true }
-        }
-      }
-    });
-    
-    if (!branch) return res.status(404).json({ success: false, message: 'Branch not found' });
+    const branch = await branchService.getBranch(req.params.id, req.user);
     res.json({ success: true, data: branch, message: 'Branch found' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+  } catch (err) {
+    next(err);
   }
 };
 
-// Update branch details (Owner)
-exports.updateBranch = async (req, res) => {
+exports.updateBranch = async (req, res, next) => {
   try {
-    const { name, location, manager_id, is_active } = req.body;
-    const branch = await prisma.branch.update({
-      where: { id: req.params.id },
-      data: { name, location, manager_id, is_active }
-    });
-    
-    if (manager_id) {
-        await prisma.user.update({
-            where: { id: manager_id },
-            data: { branch_id: branch.id }
-        });
-    }
-
+    const branch = await branchService.updateBranch(req.params.id, req.body);
     res.json({ success: true, data: branch, message: 'Branch updated' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error or Branch not found' });
+  } catch (err) {
+    next(err);
   }
 };
 
-// Deactivate branch (Owner)
-exports.deactivateBranch = async (req, res) => {
+exports.deactivateBranch = async (req, res, next) => {
   try {
-    await prisma.branch.update({
-      where: { id: req.params.id },
-      data: { is_active: false }
-    });
+    await branchService.deactivateBranch(req.params.id);
     res.json({ success: true, data: {}, message: 'Branch deactivated successfully' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+  } catch (err) {
+    next(err);
   }
 };

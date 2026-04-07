@@ -1,101 +1,46 @@
-const { PrismaClient } = require('@prisma/client');
-const bcrypt = require('bcrypt');
-const prisma = new PrismaClient();
+const userService = require('../services/user.service');
 
-// List all users
-exports.listUsers = async (req, res) => {
+exports.listUsers = async (req, res, next) => {
   try {
-    const users = await prisma.user.findMany({
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        branch_id: true,
-        vendor_id: true,
-        is_active: true,
-        created_at: true
-      }
-    });
+    const users = await userService.listUsers();
     res.json({ success: true, data: users, message: 'Users retrieved successfully' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+  } catch (err) {
+    next(err);
   }
 };
 
-// Create a new user
-exports.createUser = async (req, res) => {
+exports.createUser = async (req, res, next) => {
   try {
-    const { name, email, password, role, branch_id, vendor_id } = req.body;
-    
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      return res.status(400).json({ success: false, message: 'Email already exists' });
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const password_hash = await bcrypt.hash(password, salt);
-
-    const newUser = await prisma.user.create({
-      data: {
-        name,
-        email,
-        password_hash,
-        role,
-        branch_id,
-        vendor_id
-      },
-      select: { id: true, name: true, email: true, role: true }
-    });
-
-    res.status(201).json({ success: true, data: newUser, message: 'User created' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+    const user = await userService.createUser(req.body);
+    res.status(201).json({ success: true, data: user, message: 'User created' });
+  } catch (err) {
+    next(err);
   }
 };
 
-// Get single user
-exports.getUser = async (req, res) => {
+exports.getUser = async (req, res, next) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.params.id },
-      select: {
-        id: true, name: true, email: true, role: true, 
-        branch_id: true, vendor_id: true, is_active: true
-      }
-    });
-    
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    const user = await userService.getUser(req.params.id);
     res.json({ success: true, data: user, message: 'User found' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+  } catch (err) {
+    next(err);
   }
 };
 
-// Update user details
-exports.updateUser = async (req, res) => {
+exports.updateUser = async (req, res, next) => {
   try {
-    const { name, email, role, branch_id, vendor_id, is_active } = req.body;
-    const user = await prisma.user.update({
-      where: { id: req.params.id },
-      data: { name, email, role, branch_id, vendor_id, is_active },
-      select: { id: true, name: true, email: true, role: true, is_active: true }
-    });
+    const user = await userService.updateUser(req.params.id, req.body);
     res.json({ success: true, data: user, message: 'User updated' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error or User not found' });
+  } catch (err) {
+    next(err);
   }
 };
 
-// Deactivate user
-exports.deactivateUser = async (req, res) => {
+exports.deactivateUser = async (req, res, next) => {
   try {
-    await prisma.user.update({
-      where: { id: req.params.id },
-      data: { is_active: false }
-    });
+    await userService.deactivateUser(req.params.id);
     res.json({ success: true, data: {}, message: 'User deactivated successfully' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error or User not found' });
+  } catch (err) {
+    next(err);
   }
 };

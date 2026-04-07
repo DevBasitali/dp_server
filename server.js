@@ -1,4 +1,10 @@
 require('dotenv').config();
+
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET environment variable is not set. Refusing to start.');
+  process.exit(1);
+}
+
 const express = require('express');
 const cors = require('cors');
 
@@ -24,8 +30,11 @@ app.get('/', (req, res) => {
   res.json({ success: true, message: 'Dollar Point API is running' });
 });
 
-// Error handling basic
+// Error handler — handles AppError (operational) and unexpected errors
 app.use((err, req, res, next) => {
+  if (err.isOperational) {
+    return res.status(err.statusCode).json({ success: false, message: err.message });
+  }
   console.error(err.stack);
   res.status(500).json({ success: false, message: 'Something went wrong on the server' });
 });
@@ -33,5 +42,4 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-  console.log(`DB is running ${process.env.DATABASE_URL}`);
 });

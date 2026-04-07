@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const denylist = require('../lib/tokenDenylist');
 
 exports.requireAuth = (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -9,9 +10,13 @@ exports.requireAuth = (req, res, next) => {
 
   const token = authHeader.split(' ')[1];
 
+  if (denylist.has(token)) {
+    return res.status(401).json({ success: false, message: 'Token has been revoked.' });
+  }
+
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
-    req.user = decoded; // { userId, role, branchId, vendorId, ... }
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded; // { userId, role, branchId, vendorId }
     next();
   } catch (err) {
     return res.status(401).json({ success: false, message: 'Invalid or expired token.' });
