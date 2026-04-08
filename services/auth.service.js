@@ -48,17 +48,17 @@ exports.getMe = async (userId) => {
   return user;
 };
 
-exports.changePassword = async (userId, currentPassword, newPassword) => {
+exports.changePassword = async (userId, currentPassword, newPassword, token) => {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new AppError('User not found', 404);
 
   const valid = await bcrypt.compare(currentPassword, user.password_hash);
   if (!valid) throw new AppError('Current password is incorrect', 401);
 
-  const salt = await bcrypt.genSalt(10);
-  const password_hash = await bcrypt.hash(newPassword, salt);
+  const password_hash = await bcrypt.hash(newPassword, 10);
 
   await prisma.user.update({ where: { id: userId }, data: { password_hash } });
+  denylist.add(token);
 };
 
 exports.logout = (token) => {

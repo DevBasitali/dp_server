@@ -2,7 +2,7 @@ const userService = require('../services/user.service');
 
 exports.listUsers = async (req, res, next) => {
   try {
-    const users = await userService.listUsers();
+    const users = await userService.listUsers(req.query.role);
     res.json({ success: true, data: users, message: 'Users retrieved successfully' });
   } catch (err) {
     next(err);
@@ -11,7 +11,7 @@ exports.listUsers = async (req, res, next) => {
 
 exports.createUser = async (req, res, next) => {
   try {
-    const user = await userService.createUser(req.body);
+    const user = await userService.createUser(req.body, req.user.userId);
     res.status(201).json({ success: true, data: user, message: 'User created' });
   } catch (err) {
     next(err);

@@ -13,29 +13,51 @@ const SAFE_SELECT = {
   created_at: true,
 };
 
-exports.listUsers = async () => {
-  return prisma.user.findMany({ select: SAFE_SELECT });
+exports.listUsers = async (role) => {
+  return prisma.user.findMany({
+    where: role ? { role } : {},
+    select: SAFE_SELECT,
+  });
 };
 
-exports.createUser = async ({ name, email, password, role, branch_id, vendor_id }) => {
-  // Business logic check — Zod already validated shape/types
+exports.createUser = async ({ name, email, password, role, branch_id, vendor_id }, performedBy) => {
+  // Role-based FK validation
+  if (role === 'branch_manager') {
+    if (!branch_id) throw new AppError('branch_id is required for branch_manager', 400);
+    vendor_id = null;
+  } else if (role === 'vendor') {
+    if (!vendor_id) throw new AppError('vendor_id is required for vendor', 400);
+    branch_id = null;
+  } else {
+    branch_id = null;
+    vendor_id = null;
+  }
+
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) throw new AppError('Email already in use', 409);
 
-  const salt = await bcrypt.genSalt(10);
-  const password_hash = await bcrypt.hash(password, salt);
+  const password_hash = await bcrypt.hash(password, 10);
 
-  return prisma.user.create({
-    data: {
-      name,
-      email,
-      password_hash,
-      role,
-      branch_id: branch_id || null,
-      vendor_id: vendor_id || null,
-    },
-    select: { id: true, name: true, email: true, role: true, branch_id: true, vendor_id: true },
+  const user = await prisma.$transaction(async (tx) => {
+    const created = await tx.user.create({
+      data: { name, email, password_hash, role, branch_id, vendor_id },
+      select: SAFE_SELECT,
+    });
+
+    await tx.auditLog.create({
+      data: {
+        user_id: performedBy,
+        action: 'CREATE_USER',
+        entity_type: 'User',
+        entity_id: created.id,
+        description: `Created user ${email} with role ${role}`,
+      },
+    });
+
+    return created;
   });
+
+  return user;
 };
 
 exports.getUser = async (id) => {
@@ -45,13 +67,18 @@ exports.getUser = async (id) => {
 };
 
 exports.updateUser = async (id, data) => {
-  const exists = await prisma.user.findUnique({ where: { id } });
-  if (!exists) throw new AppError('User not found', 404);
+  const existing = await prisma.user.findUnique({ where: { id } });
+  if (!existing) throw new AppError('User not found', 404);
+
+  if (data.email && data.email !== existing.email) {
+    const taken = await prisma.user.findUnique({ where: { email: data.email } });
+    if (taken) throw new AppError('Email already in use', 409);
+  }
 
   return prisma.user.update({
     where: { id },
     data,
-    select: { id: true, name: true, email: true, role: true, is_active: true },
+    select: SAFE_SELECT,
   });
 };
 

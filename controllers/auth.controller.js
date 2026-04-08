@@ -20,10 +20,12 @@ exports.getMe = async (req, res, next) => {
 
 exports.changePassword = async (req, res, next) => {
   try {
+    const token = req.headers.authorization.split(' ')[1];
     await authService.changePassword(
       req.user.userId,
       req.body.current_password,
-      req.body.new_password
+      req.body.new_password,
+      token
     );
     res.json({ success: true, data: {}, message: 'Password changed successfully' });
   } catch (err) {
