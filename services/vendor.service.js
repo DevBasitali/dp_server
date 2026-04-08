@@ -61,11 +61,9 @@ exports.deactivateVendor = async (id) => {
   await prisma.vendor.update({ where: { id }, data: { is_active: false } });
 };
 
-// Stubs — to be implemented when Purchase/Item modules are built
+// Stub — to be implemented when Purchase module is built
 exports.getVendorLedger = async (vendorId) => {
   return [];
 };
 
-exports.getVendorItems = async (vendorId) => {
-  return [];
-};
+exports.getVendorItems = require('./item.service').listItemsByVendor;

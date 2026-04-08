@@ -56,7 +56,7 @@ exports.getVendorLedger = async (req, res, next) => {
 
 exports.getVendorItems = async (req, res, next) => {
   try {
-    const data = await vendorService.getVendorItems(req.params.id);
+    const data = await vendorService.getVendorItems(req.params.id, req.user);
     res.json({ success: true, data, message: 'Vendor items' });
   } catch (err) {
     next(err);
