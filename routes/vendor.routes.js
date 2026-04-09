@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const vendorController = require('../controllers/vendor.controller');
+const vendorOrdersController = require('../controllers/vendorOrders.controller');
 const { requireAuth, requireRole } = require('../middlewares/auth.middleware');
 const validate = require('../lib/validate');
 const { createVendorSchema, updateVendorSchema } = require('../lib/schemas/vendor.schemas');
@@ -15,5 +16,6 @@ router.delete('/:id', requireRole(['owner']), vendorController.deactivateVendor)
 
 router.get('/:id/ledger', requireRole(['owner', 'branch_manager', 'vendor']), vendorController.getVendorLedger);
 router.get('/:id/items', requireRole(['owner', 'branch_manager', 'vendor']), vendorController.getVendorItems);
+router.get('/:id/orders', requireRole(['owner', 'branch_manager', 'vendor']), vendorOrdersController.listOrdersByVendor);
 
 module.exports = router;

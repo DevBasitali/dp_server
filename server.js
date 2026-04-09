@@ -20,12 +20,18 @@ const userRoutes = require('./routes/user.routes');
 const branchRoutes = require('./routes/branch.routes');
 const vendorRoutes = require('./routes/vendor.routes');
 const itemRoutes = require('./routes/item.routes');
+const vendorOrdersRoutes = require('./routes/vendorOrders');
+const dailyClosingsRoutes = require('./routes/dailyClosings');
+const monthlyClosingsRoutes = require('./routes/monthlyClosings');
 
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/branches', branchRoutes);
 app.use('/api/v1/vendors', vendorRoutes);
 app.use('/api/v1/items', itemRoutes);
+app.use('/api/v1/vendor-orders', vendorOrdersRoutes);
+app.use('/api/v1/daily-closings', dailyClosingsRoutes);
+app.use('/api/v1/monthly-closings', monthlyClosingsRoutes);
 
 // Health check
 app.get('/', (req, res) => {
