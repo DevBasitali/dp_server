@@ -8,7 +8,8 @@ const BRANCH_INCLUDE = {
 };
 
 exports.listVendors = async (requestingUser) => {
-  const where = { is_active: true };
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
+  const where = { is_active: true, ...ownerFilter };
 
   if (requestingUser.role === 'branch_manager' && requestingUser.branchId) {
     where.branch_links = { some: { branch_id: requestingUser.branchId } };
@@ -17,15 +18,15 @@ exports.listVendors = async (requestingUser) => {
   return prisma.vendor.findMany({ where, include: BRANCH_INCLUDE });
 };
 
-exports.createVendor = async ({ name, phone, whatsapp_number, category, notes, branch_ids }) => {
+exports.createVendor = async ({ name, phone, whatsapp_number, category, notes, branch_ids }, requestingUser) => {
   return prisma.$transaction(async (tx) => {
     const vendor = await tx.vendor.create({
-      data: { name, phone, whatsapp_number, category, notes },
+      data: { name, phone, whatsapp_number, category, notes, ownerId: requestingUser.userId },
     });
 
     if (Array.isArray(branch_ids) && branch_ids.length > 0) {
       await tx.vendorBranchLink.createMany({
-        data: branch_ids.map((bId) => ({ vendor_id: vendor.id, branch_id: bId })),
+        data: branch_ids.map((bId) => ({ vendor_id: vendor.id, branch_id: bId, ownerId: requestingUser.userId })),
       });
     }
 
@@ -38,8 +39,9 @@ exports.getVendor = async (vendorId, requestingUser) => {
     throw new AppError('Access denied to other vendor profiles', 403);
   }
 
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
   const vendor = await prisma.vendor.findUnique({
-    where: { id: vendorId },
+    where: { id: vendorId, ...ownerFilter },
     include: BRANCH_INCLUDE,
   });
 
@@ -47,15 +49,30 @@ exports.getVendor = async (vendorId, requestingUser) => {
   return vendor;
 };
 
-exports.updateVendor = async (id, data) => {
-  const exists = await prisma.vendor.findUnique({ where: { id } });
+exports.updateVendor = async (id, { branch_ids, ...vendorData }, requestingUser) => {
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
+  const exists = await prisma.vendor.findUnique({ where: { id, ...ownerFilter } });
   if (!exists) throw new AppError('Vendor not found', 404);
 
-  return prisma.vendor.update({ where: { id }, data });
+  return prisma.$transaction(async (tx) => {
+    const vendor = await tx.vendor.update({ where: { id }, data: vendorData });
+
+    if (Array.isArray(branch_ids)) {
+      await tx.vendorBranchLink.deleteMany({ where: { vendor_id: id } });
+      if (branch_ids.length > 0) {
+        await tx.vendorBranchLink.createMany({
+          data: branch_ids.map((bId) => ({ vendor_id: id, branch_id: bId, ownerId: requestingUser.ownerId })),
+        });
+      }
+    }
+
+    return vendor;
+  });
 };
 
-exports.deactivateVendor = async (id) => {
-  const exists = await prisma.vendor.findUnique({ where: { id } });
+exports.deactivateVendor = async (id, requestingUser) => {
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
+  const exists = await prisma.vendor.findUnique({ where: { id, ...ownerFilter } });
   if (!exists) throw new AppError('Vendor not found', 404);
 
   await prisma.vendor.update({ where: { id }, data: { is_active: false } });

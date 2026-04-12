@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN     "accountStatus" VARCHAR(20) NOT NULL DEFAULT 'APPROVED';

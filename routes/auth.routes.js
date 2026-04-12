@@ -3,8 +3,9 @@ const router = express.Router();
 const authController = require('../controllers/auth.controller');
 const { requireAuth } = require('../middlewares/auth.middleware');
 const validate = require('../lib/validate');
-const { loginSchema, changePasswordSchema } = require('../lib/schemas/auth.schemas');
+const { signupSchema, loginSchema, changePasswordSchema } = require('../lib/schemas/auth.schemas');
 
+router.post('/signup', validate(signupSchema), authController.signup);
 router.post('/login', validate(loginSchema), authController.login);
 router.post('/logout', requireAuth, authController.logout);
 router.get('/me', requireAuth, authController.getMe);

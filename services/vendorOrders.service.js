@@ -19,11 +19,6 @@ const ORDER_SELECT = {
   },
 };
 
-/**
- * Parse items from multipart body.
- * Client sends items as a JSON string in field "items".
- * Returns array of { itemName, quantity }.
- */
 function parseItems(body) {
   if (!body.items) return [];
   if (Array.isArray(body.items)) return body.items;
@@ -34,9 +29,6 @@ function parseItems(body) {
   }
 }
 
-/**
- * Extract the file buffer for a given item index from multer's req.files array.
- */
 function getItemFile(files, index) {
   if (!Array.isArray(files)) return null;
   return files.find((f) => f.fieldname === `items[${index}][image]`) || null;
@@ -46,7 +38,6 @@ exports.createOrder = async ({ body, files, requestingUser }) => {
   const { vendorId, notes } = body;
   let { branchId } = body;
 
-  // branch_manager: enforce own branchId
   if (requestingUser.role === 'branch_manager') {
     if (branchId && branchId !== requestingUser.branchId) {
       throw new AppError('branch_manager can only create orders for their own branch', 403);
@@ -57,7 +48,6 @@ exports.createOrder = async ({ body, files, requestingUser }) => {
   if (!branchId) throw new AppError('branchId is required', 400);
   if (!vendorId) throw new AppError('vendorId is required', 400);
 
-  // Validate items
   const rawItems = parseItems(body);
   if (!rawItems.length) throw new AppError('At least one item is required', 400);
 
@@ -68,16 +58,15 @@ exports.createOrder = async ({ body, files, requestingUser }) => {
     if (!qty || qty < 1) throw new AppError(`Item ${i + 1}: quantity must be a positive integer`, 400);
   }
 
-  // Verify vendor and branch exist
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
   const [vendor, branch] = await Promise.all([
-    prisma.vendor.findUnique({ where: { id: vendorId } }),
-    prisma.branch.findUnique({ where: { id: branchId } }),
+    prisma.vendor.findUnique({ where: { id: vendorId, ...ownerFilter } }),
+    prisma.branch.findUnique({ where: { id: branchId, ...ownerFilter } }),
   ]);
 
   if (!vendor) throw new AppError('Vendor not found', 404);
   if (!branch) throw new AppError('Branch not found', 404);
 
-  // Upload item images to Cloudinary
   const itemImageUrls = await Promise.all(
     rawItems.map(async (_, i) => {
       const file = getItemFile(files, i);
@@ -91,7 +80,6 @@ exports.createOrder = async ({ body, files, requestingUser }) => {
     })
   );
 
-  // Create order + items atomically
   const order = await prisma.$transaction(async (tx) => {
     const created = await tx.vendorOrder.create({
       data: {
@@ -99,6 +87,7 @@ exports.createOrder = async ({ body, files, requestingUser }) => {
         vendor_id: vendorId,
         requested_by: requestingUser.userId,
         notes: notes || null,
+        ownerId: requestingUser.ownerId,
         items: {
           create: rawItems.map((it, i) => ({
             item_name: it.itemName,
@@ -112,41 +101,25 @@ exports.createOrder = async ({ body, files, requestingUser }) => {
     return created;
   });
 
-  // Fetch requester info for PDF/WhatsApp
   const requester = await prisma.user.findUnique({
     where: { id: requestingUser.userId },
     select: { id: true, name: true },
   });
 
-  // Generate PDF
   let pdfUrl = null;
   try {
-    const pdfBuffer = await pdfService.generateOrderPDF({
-      order,
-      vendor,
-      branch,
-      requester,
-      items: order.items,
-    });
+    const pdfBuffer = await pdfService.generateOrderPDF({ order, vendor, branch, requester, items: order.items });
     pdfUrl = await cloudinaryService.uploadPDF(pdfBuffer, 'vendor-orders/pdfs');
   } catch (err) {
     console.error('PDF generation/upload failed:', err.message);
   }
 
-  // Send WhatsApp notifications
   let whatsappSent = false;
   let whatsappSentAt = null;
 
   if (pdfUrl) {
     try {
-      await whatsappService.sendOrderNotifications({
-        order,
-        vendor,
-        branch,
-        requester,
-        items: order.items,
-        pdfUrl,
-      });
+      await whatsappService.sendOrderNotifications({ order, vendor, branch, requester, items: order.items, pdfUrl });
       whatsappSent = true;
       whatsappSentAt = new Date();
     } catch (err) {
@@ -154,14 +127,12 @@ exports.createOrder = async ({ body, files, requestingUser }) => {
     }
   }
 
-  // Update order with pdfUrl + whatsapp status
   const updatedOrder = await prisma.vendorOrder.update({
     where: { id: order.id },
     data: { pdf_url: pdfUrl, whatsapp_sent: whatsappSent, whatsapp_sent_at: whatsappSentAt },
     select: ORDER_SELECT,
   });
 
-  // Audit log
   await prisma.auditLog.create({
     data: {
       user_id: requestingUser.userId,
@@ -169,6 +140,7 @@ exports.createOrder = async ({ body, files, requestingUser }) => {
       entity_type: 'vendor_order',
       entity_id: order.id,
       description: `Order sent to vendor ${vendor.name} for branch ${branch.name}`,
+      ownerId: requestingUser.ownerId,
     },
   });
 
@@ -176,7 +148,8 @@ exports.createOrder = async ({ body, files, requestingUser }) => {
 };
 
 exports.listOrders = async ({ requestingUser, query }) => {
-  const where = {};
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
+  const where = { ...ownerFilter };
 
   if (requestingUser.role === 'branch_manager') {
     where.branch_id = requestingUser.branchId;
@@ -186,7 +159,7 @@ exports.listOrders = async ({ requestingUser, query }) => {
     where.vendor_id = query.vendorId;
   }
 
-  if (query.branchId && requestingUser.role === 'owner') {
+  if (query.branchId && (requestingUser.role === 'owner' || requestingUser.isSuperAdmin)) {
     where.branch_id = query.branchId;
   }
 
@@ -198,23 +171,20 @@ exports.listOrders = async ({ requestingUser, query }) => {
 };
 
 exports.getOrder = async (orderId, requestingUser) => {
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
   const order = await prisma.vendorOrder.findUnique({
-    where: { id: orderId },
+    where: { id: orderId, ...ownerFilter },
     select: ORDER_SELECT,
   });
 
   if (!order) throw new AppError('Order not found', 404);
 
-  if (requestingUser.role === 'vendor') {
-    if (order.vendor_id !== requestingUser.vendorId) {
-      throw new AppError('Access denied', 403);
-    }
+  if (requestingUser.role === 'vendor' && order.vendor_id !== requestingUser.vendorId) {
+    throw new AppError('Access denied', 403);
   }
 
-  if (requestingUser.role === 'branch_manager') {
-    if (order.branch_id !== requestingUser.branchId) {
-      throw new AppError('Access denied', 403);
-    }
+  if (requestingUser.role === 'branch_manager' && order.branch_id !== requestingUser.branchId) {
+    throw new AppError('Access denied', 403);
   }
 
   return order;
@@ -225,8 +195,9 @@ exports.listOrdersByVendor = async (vendorId, requestingUser) => {
     throw new AppError('Access denied', 403);
   }
 
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
   return prisma.vendorOrder.findMany({
-    where: { vendor_id: vendorId },
+    where: { vendor_id: vendorId, ...ownerFilter },
     select: ORDER_SELECT,
     orderBy: { created_at: 'desc' },
   });

@@ -7,18 +7,20 @@ const DAILY_CLOSING_SELECT = {
   closingDate: true,
   cashSales: true,
   easypaisaSales: true,
-  dailyExpense: true,
   totalSales: true,
-  netTotal: true,
+  registerTotal: true,
+  physicalToBox: true,
   notes: true,
   createdAt: true,
+  expenses: {
+    select: { id: true, description: true, amount: true, source: true, createdAt: true },
+  },
 };
 
 exports.create = async ({ body, requestingUser }) => {
-  const { cashSales, easypaisaSales, dailyExpense, notes } = body;
+  const { cashSales, easypaisaSales, notes, expenses = [] } = body;
   let { branchId, closingDate } = body;
 
-  // branch_manager: enforce own branchId
   if (requestingUser.role === 'branch_manager') {
     if (branchId && branchId !== requestingUser.branchId) {
       throw new AppError('branch_manager can only submit closings for their own branch', 403);
@@ -28,20 +30,15 @@ exports.create = async ({ body, requestingUser }) => {
 
   if (!branchId) throw new AppError('branchId is required', 400);
 
-  // Default closingDate to today
   const dateStr = closingDate || new Date().toISOString().slice(0, 10);
   const parsedDate = new Date(dateStr);
 
-  // Reject negative values (belt-and-suspenders beyond Zod)
-  if (cashSales < 0 || easypaisaSales < 0 || dailyExpense < 0) {
-    throw new AppError('Values cannot be negative.', 400);
-  }
+  if (cashSales < 0 || easypaisaSales < 0) throw new AppError('Values cannot be negative.', 400);
 
-  // Check branch exists
-  const branch = await prisma.branch.findUnique({ where: { id: branchId } });
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
+  const branch = await prisma.branch.findUnique({ where: { id: branchId, ...ownerFilter } });
   if (!branch) throw new AppError('Branch not found', 404);
 
-  // Check month is not locked
   const month = parsedDate.getMonth() + 1;
   const year = parsedDate.getFullYear();
   const lockedMonth = await prisma.monthlyClosing.findUnique({
@@ -52,15 +49,16 @@ exports.create = async ({ body, requestingUser }) => {
     throw new AppError('This month is already closed. No new entries allowed.', 409);
   }
 
-  // Check for duplicate
   const existing = await prisma.dailyClosing.findUnique({
     where: { branchId_closingDate: { branchId, closingDate: parsedDate } },
   });
   if (existing) throw new AppError('A closing entry already exists for this date.', 409);
 
-  // Calculate server-side
+  const saleExpenses = expenses.filter(e => e.source === 'SALE').reduce((sum, e) => sum + e.amount, 0);
+  const calExpenses = expenses.filter(e => e.source === 'CAL').reduce((sum, e) => sum + e.amount, 0);
   const totalSales = cashSales + easypaisaSales;
-  const netTotal = totalSales - dailyExpense;
+  const registerTotal = totalSales + saleExpenses;
+  const physicalToBox = totalSales - saleExpenses;
 
   const closing = await prisma.$transaction(async (tx) => {
     const created = await tx.dailyClosing.create({
@@ -70,12 +68,32 @@ exports.create = async ({ body, requestingUser }) => {
         closingDate: parsedDate,
         cashSales,
         easypaisaSales,
-        dailyExpense,
         totalSales,
-        netTotal,
+        registerTotal,
+        physicalToBox,
         notes: notes || null,
+        ownerId: requestingUser.ownerId,
+        expenses: {
+          create: expenses.map(e => ({
+            description: e.description,
+            amount: e.amount,
+            source: e.source,
+            ownerId: requestingUser.ownerId,
+          })),
+        },
       },
       select: DAILY_CLOSING_SELECT,
+    });
+
+    const calBox = await tx.calBox.upsert({
+      where: { branchId },
+      create: { branchId, balance: 0, ownerId: requestingUser.ownerId },
+      update: {},
+    });
+
+    await tx.calBox.update({
+      where: { branchId },
+      data: { balance: Number(calBox.balance) + physicalToBox - calExpenses },
     });
 
     await tx.auditLog.create({
@@ -85,6 +103,7 @@ exports.create = async ({ body, requestingUser }) => {
         entity_type: 'daily_closing',
         entity_id: created.id,
         description: `Daily closing added for branch ${branch.name} on ${dateStr}`,
+        ownerId: requestingUser.ownerId,
       },
     });
 
@@ -95,7 +114,8 @@ exports.create = async ({ body, requestingUser }) => {
 };
 
 exports.list = async ({ requestingUser, query }) => {
-  const where = {};
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
+  const where = { ...ownerFilter };
 
   if (requestingUser.role === 'branch_manager') {
     where.branchId = requestingUser.branchId;
@@ -106,9 +126,7 @@ exports.list = async ({ requestingUser, query }) => {
   if (query.month && query.year) {
     const month = parseInt(query.month, 10);
     const year = parseInt(query.year, 10);
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 1);
-    where.closingDate = { gte: startDate, lt: endDate };
+    where.closingDate = { gte: new Date(year, month - 1, 1), lt: new Date(year, month, 1) };
   }
 
   return prisma.dailyClosing.findMany({
@@ -131,39 +149,47 @@ exports.getSummary = async ({ requestingUser, query }) => {
 
   const monthNum = parseInt(month, 10);
   const yearNum = parseInt(year, 10);
-  const startDate = new Date(yearNum, monthNum - 1, 1);
-  const endDate = new Date(yearNum, monthNum, 1);
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
 
   const records = await prisma.dailyClosing.findMany({
     where: {
       branchId,
-      closingDate: { gte: startDate, lt: endDate },
+      ...ownerFilter,
+      closingDate: { gte: new Date(yearNum, monthNum - 1, 1), lt: new Date(yearNum, monthNum, 1) },
     },
-    select: DAILY_CLOSING_SELECT,
+    select: {
+      cashSales: true,
+      easypaisaSales: true,
+      totalSales: true,
+      registerTotal: true,
+      physicalToBox: true,
+      expenses: { select: { amount: true, source: true } },
+    },
   });
 
   const totalCashSales = records.reduce((sum, r) => sum + Number(r.cashSales), 0);
   const totalEasypaisaSales = records.reduce((sum, r) => sum + Number(r.easypaisaSales), 0);
   const totalSales = records.reduce((sum, r) => sum + Number(r.totalSales), 0);
-  const totalExpenses = records.reduce((sum, r) => sum + Number(r.dailyExpense), 0);
-  const netBachat = totalSales - totalExpenses;
+  const totalRegister = records.reduce((sum, r) => sum + Number(r.registerTotal), 0);
+  const totalPhysical = records.reduce((sum, r) => sum + Number(r.physicalToBox), 0);
+  const allExpenses = records.flatMap(r => r.expenses);
+  const totalSaleExpenses = allExpenses.filter(e => e.source === 'SALE').reduce((sum, e) => sum + Number(e.amount), 0);
+  const totalCalExpenses = allExpenses.filter(e => e.source === 'CAL').reduce((sum, e) => sum + Number(e.amount), 0);
 
   return {
-    branchId,
-    month: monthNum,
-    year: yearNum,
+    branchId, month: monthNum, year: yearNum,
     daysRecorded: records.length,
-    totalCashSales,
-    totalEasypaisaSales,
-    totalSales,
-    totalExpenses,
-    netBachat,
+    totalCashSales, totalEasypaisaSales, totalSales,
+    totalSaleExpenses, totalCalExpenses,
+    totalRegister, totalPhysical,
+    netBachat: totalSales - totalSaleExpenses,
   };
 };
 
 exports.update = async ({ id, body, requestingUser }) => {
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
   const closing = await prisma.dailyClosing.findUnique({
-    where: { id },
+    where: { id, ...ownerFilter },
     select: { ...DAILY_CLOSING_SELECT, enteredBy: true, branchId: true },
   });
 
@@ -174,46 +200,64 @@ exports.update = async ({ id, body, requestingUser }) => {
       throw new AppError('You can only edit your own entries', 403);
     }
     const today = new Date().toISOString().slice(0, 10);
-    const closingDateStr = new Date(closing.closingDate).toISOString().slice(0, 10);
-    if (closingDateStr !== today) {
+    if (new Date(closing.closingDate).toISOString().slice(0, 10) !== today) {
       throw new AppError('branch_manager can only edit entries for today', 403);
     }
   }
 
-  // Check month is not locked
   const closingMonth = new Date(closing.closingDate).getMonth() + 1;
   const closingYear = new Date(closing.closingDate).getFullYear();
-  const lockedMonthForUpdate = await prisma.monthlyClosing.findUnique({
+  const lockedMonth = await prisma.monthlyClosing.findUnique({
     where: { branchId_month_year: { branchId: closing.branchId, month: closingMonth, year: closingYear } },
     select: { isLocked: true },
   });
-  if (lockedMonthForUpdate && lockedMonthForUpdate.isLocked) {
+  if (lockedMonth && lockedMonth.isLocked) {
     throw new AppError('This month is already closed. No new entries allowed.', 409);
   }
 
   const cashSales = body.cashSales !== undefined ? body.cashSales : Number(closing.cashSales);
   const easypaisaSales = body.easypaisaSales !== undefined ? body.easypaisaSales : Number(closing.easypaisaSales);
-  const dailyExpense = body.dailyExpense !== undefined ? body.dailyExpense : Number(closing.dailyExpense);
+  const expenses = body.expenses !== undefined ? body.expenses : closing.expenses.map(e => ({
+    description: e.description, amount: Number(e.amount), source: e.source,
+  }));
 
-  if (cashSales < 0 || easypaisaSales < 0 || dailyExpense < 0) {
-    throw new AppError('Values cannot be negative.', 400);
-  }
+  if (cashSales < 0 || easypaisaSales < 0) throw new AppError('Values cannot be negative.', 400);
 
+  const oldCalExpenses = closing.expenses.filter(e => e.source === 'CAL').reduce((sum, e) => sum + Number(e.amount), 0);
+  const oldPhysicalToBox = Number(closing.physicalToBox);
+  const saleExpenses = expenses.filter(e => e.source === 'SALE').reduce((sum, e) => sum + e.amount, 0);
+  const calExpenses = expenses.filter(e => e.source === 'CAL').reduce((sum, e) => sum + e.amount, 0);
   const totalSales = cashSales + easypaisaSales;
-  const netTotal = totalSales - dailyExpense;
+  const registerTotal = totalSales + saleExpenses;
+  const physicalToBox = totalSales - saleExpenses;
 
-  const updated = await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
+    await tx.dailyExpense.deleteMany({ where: { closingId: id } });
+
     const result = await tx.dailyClosing.update({
       where: { id },
       data: {
-        cashSales,
-        easypaisaSales,
-        dailyExpense,
-        totalSales,
-        netTotal,
+        cashSales, easypaisaSales, totalSales, registerTotal, physicalToBox,
         notes: body.notes !== undefined ? body.notes : closing.notes,
+        expenses: {
+          create: expenses.map(e => ({
+            description: e.description, amount: e.amount, source: e.source,
+            ownerId: requestingUser.ownerId,
+          })),
+        },
       },
       select: DAILY_CLOSING_SELECT,
+    });
+
+    const calBox = await tx.calBox.upsert({
+      where: { branchId: closing.branchId },
+      create: { branchId: closing.branchId, balance: 0, ownerId: requestingUser.ownerId },
+      update: {},
+    });
+
+    await tx.calBox.update({
+      where: { branchId: closing.branchId },
+      data: { balance: Number(calBox.balance) - oldPhysicalToBox + oldCalExpenses + physicalToBox - calExpenses },
     });
 
     await tx.auditLog.create({
@@ -223,11 +267,10 @@ exports.update = async ({ id, body, requestingUser }) => {
         entity_type: 'daily_closing',
         entity_id: id,
         description: `Daily closing updated for closing ID ${id}`,
+        ownerId: requestingUser.ownerId,
       },
     });
 
     return result;
   });
-
-  return updated;
 };

@@ -15,6 +15,7 @@ app.use(cors());
 app.use(express.json());
 
 // Routes
+const superAdminRoutes = require('./routes/superAdmin');
 const authRoutes = require('./routes/auth.routes');
 const userRoutes = require('./routes/user.routes');
 const branchRoutes = require('./routes/branch.routes');
@@ -23,7 +24,13 @@ const itemRoutes = require('./routes/item.routes');
 const vendorOrdersRoutes = require('./routes/vendorOrders');
 const dailyClosingsRoutes = require('./routes/dailyClosings');
 const monthlyClosingsRoutes = require('./routes/monthlyClosings');
+const calBoxRoutes = require('./routes/calBox');
+const vendorLedgerRoutes = require('./routes/vendorLedger');
 
+const { requireAuth } = require('./middlewares/auth.middleware');
+const requireSuperAdmin = require('./middlewares/requireSuperAdmin');
+
+app.use('/api/v1/super-admin', requireAuth, requireSuperAdmin, superAdminRoutes);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/branches', branchRoutes);
@@ -32,6 +39,8 @@ app.use('/api/v1/items', itemRoutes);
 app.use('/api/v1/vendor-orders', vendorOrdersRoutes);
 app.use('/api/v1/daily-closings', dailyClosingsRoutes);
 app.use('/api/v1/monthly-closings', monthlyClosingsRoutes);
+app.use('/api/v1/cal-box', calBoxRoutes);
+app.use('/api/v1/vendor-ledger', vendorLedgerRoutes);
 
 // Health check
 app.get('/', (req, res) => {

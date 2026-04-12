@@ -11,7 +11,7 @@ exports.listVendors = async (req, res, next) => {
 
 exports.createVendor = async (req, res, next) => {
   try {
-    const vendor = await vendorService.createVendor(req.body);
+    const vendor = await vendorService.createVendor(req.body, req.user);
     res.status(201).json({ success: true, data: vendor, message: 'Vendor created' });
   } catch (err) {
     next(err);
@@ -29,7 +29,7 @@ exports.getVendor = async (req, res, next) => {
 
 exports.updateVendor = async (req, res, next) => {
   try {
-    const vendor = await vendorService.updateVendor(req.params.id, req.body);
+    const vendor = await vendorService.updateVendor(req.params.id, req.body, req.user);
     res.json({ success: true, data: vendor, message: 'Vendor updated' });
   } catch (err) {
     next(err);
@@ -38,7 +38,7 @@ exports.updateVendor = async (req, res, next) => {
 
 exports.deactivateVendor = async (req, res, next) => {
   try {
-    await vendorService.deactivateVendor(req.params.id);
+    await vendorService.deactivateVendor(req.params.id, req.user);
     res.json({ success: true, data: {}, message: 'Vendor deactivated successfully' });
   } catch (err) {
     next(err);

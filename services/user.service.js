@@ -11,16 +11,25 @@ const SAFE_SELECT = {
   vendor_id: true,
   is_active: true,
   created_at: true,
+  createdBy: true,
 };
 
-exports.listUsers = async (role) => {
+exports.listUsers = async (requestingUser, role) => {
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { createdBy: requestingUser.userId };
   return prisma.user.findMany({
-    where: role ? { role } : {},
-    select: SAFE_SELECT,
+    where: {
+      ...ownerFilter,
+      ...(role ? { role } : {}),
+    },
+    select: {
+      ...SAFE_SELECT,
+      branch: { select: { id: true, name: true } },
+      vendor: { select: { id: true, name: true } },
+    },
   });
 };
 
-exports.createUser = async ({ name, email, password, role, branch_id, vendor_id }, performedBy) => {
+exports.createUser = async ({ name, email, password, role, branch_id, vendor_id }, requestingUser) => {
   // Role-based FK validation
   if (role === 'branch_manager') {
     if (!branch_id) throw new AppError('branch_id is required for branch_manager', 400);
@@ -40,17 +49,18 @@ exports.createUser = async ({ name, email, password, role, branch_id, vendor_id 
 
   const user = await prisma.$transaction(async (tx) => {
     const created = await tx.user.create({
-      data: { name, email, password_hash, role, branch_id, vendor_id },
+      data: { name, email, password_hash, role, branch_id, vendor_id, createdBy: requestingUser.userId },
       select: SAFE_SELECT,
     });
 
     await tx.auditLog.create({
       data: {
-        user_id: performedBy,
+        user_id: requestingUser.userId,
         action: 'CREATE_USER',
         entity_type: 'User',
         entity_id: created.id,
         description: `Created user ${email} with role ${role}`,
+        ownerId: requestingUser.ownerId,
       },
     });
 
@@ -60,14 +70,19 @@ exports.createUser = async ({ name, email, password, role, branch_id, vendor_id 
   return user;
 };
 
-exports.getUser = async (id) => {
-  const user = await prisma.user.findUnique({ where: { id }, select: SAFE_SELECT });
+exports.getUser = async (id, requestingUser) => {
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { createdBy: requestingUser.userId };
+  const user = await prisma.user.findUnique({
+    where: { id, ...ownerFilter },
+    select: SAFE_SELECT,
+  });
   if (!user) throw new AppError('User not found', 404);
   return user;
 };
 
-exports.updateUser = async (id, data) => {
-  const existing = await prisma.user.findUnique({ where: { id } });
+exports.updateUser = async (id, data, requestingUser) => {
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { createdBy: requestingUser.userId };
+  const existing = await prisma.user.findUnique({ where: { id, ...ownerFilter } });
   if (!existing) throw new AppError('User not found', 404);
 
   if (data.email && data.email !== existing.email) {
@@ -82,8 +97,9 @@ exports.updateUser = async (id, data) => {
   });
 };
 
-exports.deactivateUser = async (id) => {
-  const exists = await prisma.user.findUnique({ where: { id } });
+exports.deactivateUser = async (id, requestingUser) => {
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { createdBy: requestingUser.userId };
+  const exists = await prisma.user.findUnique({ where: { id, ...ownerFilter } });
   if (!exists) throw new AppError('User not found', 404);
 
   await prisma.user.update({ where: { id }, data: { is_active: false } });

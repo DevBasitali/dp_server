@@ -20,25 +20,27 @@ function calcMargins(cost_price, selling_price) {
   return { margin, margin_percent };
 }
 
-exports.createItem = async ({ name, category, vendor_id, cost_price, selling_price }, performedBy) => {
-  const vendor = await prisma.vendor.findUnique({ where: { id: vendor_id } });
+exports.createItem = async ({ name, category, vendor_id, cost_price, selling_price }, requestingUser) => {
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
+  const vendor = await prisma.vendor.findUnique({ where: { id: vendor_id, ...ownerFilter } });
   if (!vendor) throw new AppError('Vendor not found', 404);
 
   const { margin, margin_percent } = calcMargins(cost_price, selling_price);
 
   return prisma.$transaction(async (tx) => {
     const item = await tx.item.create({
-      data: { name, category, vendor_id, cost_price, selling_price, margin, margin_percent },
+      data: { name, category, vendor_id, cost_price, selling_price, margin, margin_percent, ownerId: requestingUser.ownerId },
       select: SAFE_SELECT,
     });
 
     await tx.auditLog.create({
       data: {
-        user_id: performedBy,
+        user_id: requestingUser.userId,
         action: 'CREATE_ITEM',
         entity_type: 'Item',
         entity_id: item.id,
         description: `Created item "${name}" for vendor ${vendor_id}`,
+        ownerId: requestingUser.ownerId,
       },
     });
 
@@ -46,22 +48,25 @@ exports.createItem = async ({ name, category, vendor_id, cost_price, selling_pri
   });
 };
 
-exports.listItems = async ({ vendor_id, category } = {}) => {
-  const where = { is_active: true };
+exports.listItems = async ({ vendor_id, category } = {}, requestingUser) => {
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
+  const where = { is_active: true, ...ownerFilter };
   if (vendor_id) where.vendor_id = vendor_id;
   if (category) where.category = category;
 
   return prisma.item.findMany({ where, select: SAFE_SELECT });
 };
 
-exports.getItem = async (id) => {
-  const item = await prisma.item.findUnique({ where: { id }, select: SAFE_SELECT });
+exports.getItem = async (id, requestingUser) => {
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
+  const item = await prisma.item.findUnique({ where: { id, ...ownerFilter }, select: SAFE_SELECT });
   if (!item) throw new AppError('Item not found', 404);
   return item;
 };
 
-exports.updateItem = async (id, { name, category, cost_price, selling_price, is_active }, performedBy) => {
-  const existing = await prisma.item.findUnique({ where: { id } });
+exports.updateItem = async (id, { name, category, cost_price, selling_price, is_active }, requestingUser) => {
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
+  const existing = await prisma.item.findUnique({ where: { id, ...ownerFilter } });
   if (!existing) throw new AppError('Item not found', 404);
 
   const newCost = cost_price !== undefined ? cost_price : Number(existing.cost_price);
@@ -80,11 +85,12 @@ exports.updateItem = async (id, { name, category, cost_price, selling_price, is_
 
     await tx.auditLog.create({
       data: {
-        user_id: performedBy,
+        user_id: requestingUser.userId,
         action: 'UPDATE_ITEM',
         entity_type: 'Item',
         entity_id: id,
         description: `Updated item "${item.name}"`,
+        ownerId: requestingUser.ownerId,
       },
     });
 
@@ -97,11 +103,12 @@ exports.listItemsByVendor = async (vendorId, requestingUser) => {
     throw new AppError('Access denied to other vendor items', 403);
   }
 
-  const vendor = await prisma.vendor.findUnique({ where: { id: vendorId } });
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
+  const vendor = await prisma.vendor.findUnique({ where: { id: vendorId, ...ownerFilter } });
   if (!vendor) throw new AppError('Vendor not found', 404);
 
   return prisma.item.findMany({
-    where: { vendor_id: vendorId, is_active: true },
+    where: { vendor_id: vendorId, is_active: true, ...ownerFilter },
     select: SAFE_SELECT,
   });
 };

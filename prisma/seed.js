@@ -3,57 +3,49 @@ const bcrypt = require('bcrypt');
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('Starting seed...');
+  // 1. Super Admin
+  const existingSA = await prisma.user.findUnique({ where: { email: 'superadmin@dollarpoint.pk' } });
+  if (!existingSA) {
+    const sa_hash = await bcrypt.hash('SuperAdmin@1234', 10);
+    await prisma.user.create({
+      data: {
+        name: 'Super Admin',
+        email: 'superadmin@dollarpoint.pk',
+        password_hash: sa_hash,
+        role: 'super_admin',
+        branch_id: null,
+        vendor_id: null,
+        createdBy: null,
+        is_active: true,
+        accountStatus: 'APPROVED',
+      },
+    });
+    console.log('Super Admin seeded: superadmin@dollarpoint.pk');
+  } else {
+    console.log('Super Admin already exists, skipping.');
+  }
 
-  // Hash password
-  const salt = await bcrypt.genSalt(10);
-  const password_hash = await bcrypt.hash('Admin@1234', salt);
-
-  // 1. Create Owner User
-  const owner = await prisma.user.upsert({
-    where: { email: 'owner@dollarpoint.pk' },
-    update: {},
-    create: {
-      name: 'Owner',
-      email: 'owner@dollarpoint.pk',
-      password_hash,
-      role: 'owner',
-      is_active: true,
-    },
-  });
-  console.log(`Owner created: ${owner.email}`);
-
-  // 2. Create sample Branch
-  const branch = await prisma.branch.create({
-    data: {
-      name: 'Alipur Branch',
-      location: 'Alipur, Rawalpindi',
-      is_active: true,
-    },
-  });
-  console.log(`Branch created: ${branch.name}`);
-
-  // 3. Create sample Vendor
-  const vendor = await prisma.vendor.create({
-    data: {
-      name: 'Hamza Melamine',
-      phone: '03001234567',
-      whatsapp_number: '03001234567',
-      category: 'Melamine',
-      notes: 'Sample vendor initialized by system.',
-      is_active: true,
-    },
-  });
-  console.log(`Vendor created: ${vendor.name}`);
-
-  // 4. Link vendor to branch
-  await prisma.vendorBranchLink.create({
-    data: {
-      vendor_id: vendor.id,
-      branch_id: branch.id,
-    },
-  });
-  console.log(`Linked Vendor to Branch.`);
+  // 2. Owner
+  const existingOwner = await prisma.user.findUnique({ where: { email: 'owner@dollarpoint.pk' } });
+  if (!existingOwner) {
+    const owner_hash = await bcrypt.hash('Admin@1234', 10);
+    await prisma.user.create({
+      data: {
+        name: 'Owner',
+        email: 'owner@dollarpoint.pk',
+        password_hash: owner_hash,
+        role: 'owner',
+        branch_id: null,
+        vendor_id: null,
+        createdBy: null,
+        is_active: true,
+        accountStatus: 'APPROVED',
+      },
+    });
+    console.log('Owner seeded: owner@dollarpoint.pk');
+  } else {
+    console.log('Owner already exists, skipping.');
+  }
 }
 
 main()
