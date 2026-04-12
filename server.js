@@ -15,6 +15,7 @@ const app = express();
 // Middlewares
 const allowedOrigins = [
   'http://localhost:3000',
+  'https://your-vercel-app.vercel.app',
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
@@ -23,7 +24,7 @@ app.use(cors({
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new AppError('Not allowed by CORS', 403));
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true
