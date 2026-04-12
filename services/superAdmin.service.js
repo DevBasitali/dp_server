@@ -12,49 +12,22 @@ const OWNER_SAFE_SELECT = {
 };
 
 exports.getDashboard = async () => {
-  const [
-    totalOwners,
-    pendingApprovals,
-    totalBranches,
-    totalVendors,
-    totalUsers,
-    totalVendorOrders,
-    totalDailyClosings,
-    pendingOwners,
-    recentOwners,
-  ] = await Promise.all([
-    prisma.user.count({ where: { role: 'owner' } }),
-    prisma.user.count({ where: { role: 'owner', accountStatus: 'PENDING' } }),
-    prisma.branch.count(),
-    prisma.vendor.count(),
-    prisma.user.count({ where: { role: { in: ['branch_manager', 'vendor'] } } }),
-    prisma.vendorOrder.count(),
-    prisma.dailyClosing.count(),
-    prisma.user.findMany({
-      where: { role: 'owner', accountStatus: 'PENDING' },
-      select: OWNER_SAFE_SELECT,
-      orderBy: { created_at: 'asc' },
-    }),
-    prisma.user.findMany({
-      where: { role: 'owner', accountStatus: 'APPROVED' },
-      select: OWNER_SAFE_SELECT,
-      orderBy: { created_at: 'desc' },
-      take: 5,
-    }),
-  ]);
+  const [totalOwners, pendingApprovals, bannedOwners, activeOwners, pendingOwners] =
+    await Promise.all([
+      prisma.user.count({ where: { role: 'owner' } }),
+      prisma.user.count({ where: { role: 'owner', accountStatus: 'PENDING' } }),
+      prisma.user.count({ where: { role: 'owner', accountStatus: 'BANNED' } }),
+      prisma.user.count({ where: { role: 'owner', accountStatus: 'APPROVED', is_active: true } }),
+      prisma.user.findMany({
+        where: { role: 'owner', accountStatus: 'PENDING' },
+        select: { id: true, name: true, email: true, created_at: true },
+        orderBy: { created_at: 'asc' },
+      }),
+    ]);
 
   return {
-    stats: {
-      totalOwners,
-      pendingApprovals,
-      totalBranches,
-      totalVendors,
-      totalUsers,
-      totalVendorOrders,
-      totalDailyClosings,
-    },
+    stats: { totalOwners, pendingApprovals, bannedOwners, activeOwners },
     pendingOwners,
-    recentOwners,
   };
 };
 
@@ -62,30 +35,11 @@ exports.listOwners = async (status) => {
   const where = { role: 'owner' };
   if (status) where.accountStatus = status;
 
-  const owners = await prisma.user.findMany({
+  return prisma.user.findMany({
     where,
-    select: { ...OWNER_SAFE_SELECT },
+    select: { id: true, name: true, email: true, accountStatus: true, is_active: true, created_at: true },
     orderBy: { created_at: 'desc' },
   });
-
-  const ownerIds = owners.map(o => o.id);
-
-  const [branchCounts, userCounts, vendorCounts] = await Promise.all([
-    prisma.branch.groupBy({ by: ['ownerId'], where: { ownerId: { in: ownerIds } }, _count: { id: true } }),
-    prisma.user.groupBy({ by: ['createdBy'], where: { createdBy: { in: ownerIds } }, _count: { id: true } }),
-    prisma.vendor.groupBy({ by: ['ownerId'], where: { ownerId: { in: ownerIds } }, _count: { id: true } }),
-  ]);
-
-  const branchMap = new Map(branchCounts.map(r => [r.ownerId, r._count.id]));
-  const userMap = new Map(userCounts.map(r => [r.createdBy, r._count.id]));
-  const vendorMap = new Map(vendorCounts.map(r => [r.ownerId, r._count.id]));
-
-  return owners.map(o => ({
-    ...o,
-    branchCount: branchMap.get(o.id) || 0,
-    userCount: userMap.get(o.id) || 0,
-    vendorCount: vendorMap.get(o.id) || 0,
-  }));
 };
 
 exports.createOwner = async ({ name, email, password }) => {

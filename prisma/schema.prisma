@@ -109,6 +109,7 @@ model Vendor {
   vendor_orders       VendorOrder[]
   vendor_inventories  VendorInventory[]
   vendor_payments     VendorPayment[]
+  daily_expenses      DailyExpense[]
 }
 
 model VendorBranchLink {
@@ -318,6 +319,7 @@ model DailyClosing {
   branch          Branch         @relation(fields: [branchId], references: [id])
   enterer         User           @relation("DailyClosingEnterer", fields: [enteredBy], references: [id])
   expenses        DailyExpense[]
+  vendor_payments VendorPayment[]
 
   @@unique([branchId, closingDate])
 }
@@ -330,9 +332,11 @@ model DailyExpense {
   source      String       @db.VarChar(10)
   createdAt   DateTime     @default(now())
   ownerId     String       @db.Uuid
+  vendorId    String?      @db.Uuid
 
   owner       User         @relation("OwnedDailyExpenses", fields: [ownerId], references: [id])
   closing     DailyClosing @relation(fields: [closingId], references: [id])
+  vendor      Vendor?      @relation(fields: [vendorId], references: [id])
 }
 
 model CalBox {
@@ -392,19 +396,21 @@ model VendorInventory {
 }
 
 model VendorPayment {
-  id          String   @id @default(uuid()) @db.Uuid
-  vendorId    String   @db.Uuid
-  branchId    String   @db.Uuid
-  amount      Decimal  @db.Decimal(12,2)
-  source      String   @db.VarChar(10)
-  description String   @db.VarChar(300)
-  date        DateTime @db.Date
-  recordedBy  String   @db.Uuid
-  createdAt   DateTime @default(now())
-  ownerId     String   @db.Uuid
+  id          String        @id @default(uuid()) @db.Uuid
+  vendorId    String        @db.Uuid
+  branchId    String        @db.Uuid
+  amount      Decimal       @db.Decimal(12,2)
+  source      String        @db.VarChar(10)
+  description String        @db.VarChar(300)
+  date        DateTime      @db.Date
+  recordedBy  String        @db.Uuid
+  createdAt   DateTime      @default(now())
+  ownerId     String        @db.Uuid
+  closingId   String?       @db.Uuid
 
-  owner       User     @relation("OwnedVendorPayments", fields: [ownerId], references: [id])
-  vendor      Vendor   @relation(fields: [vendorId], references: [id])
-  branch      Branch   @relation(fields: [branchId], references: [id])
-  recorder    User     @relation("VendorPaymentRecorder", fields: [recordedBy], references: [id])
+  owner       User          @relation("OwnedVendorPayments", fields: [ownerId], references: [id])
+  vendor      Vendor        @relation(fields: [vendorId], references: [id])
+  branch      Branch        @relation(fields: [branchId], references: [id])
+  recorder    User          @relation("VendorPaymentRecorder", fields: [recordedBy], references: [id])
+  closing     DailyClosing? @relation(fields: [closingId], references: [id])
 }

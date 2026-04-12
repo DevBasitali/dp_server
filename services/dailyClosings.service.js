@@ -19,7 +19,7 @@ const DAILY_CLOSING_SELECT = {
     select: { id: true, name: true },
   },
   expenses: {
-    select: { id: true, description: true, amount: true, source: true, createdAt: true },
+    select: { id: true, description: true, amount: true, source: true, vendorId: true, createdAt: true },
   },
 };
 
@@ -85,11 +85,29 @@ exports.create = async ({ body, requestingUser }) => {
             amount: e.amount,
             source: e.source,
             ownerId: requestingUser.ownerId,
+            ...(e.vendorId ? { vendorId: e.vendorId } : {}),
           })),
         },
       },
       select: DAILY_CLOSING_SELECT,
     });
+
+    const vendorExpenses = expenses.filter(e => e.vendorId);
+    for (const e of vendorExpenses) {
+      await tx.vendorPayment.create({
+        data: {
+          vendorId: e.vendorId,
+          branchId,
+          amount: e.amount,
+          source: e.source,
+          description: e.description,
+          date: parsedDate,
+          recordedBy: requestingUser.userId,
+          ownerId: requestingUser.ownerId,
+          closingId: created.id,
+        },
+      });
+    }
 
     const calBox = await tx.calBox.upsert({
       where: { branchId },
@@ -244,7 +262,7 @@ exports.update = async ({ id, body, requestingUser }) => {
   const cashSales = body.cashSales !== undefined ? body.cashSales : Number(closing.cashSales);
   const easypaisaSales = body.easypaisaSales !== undefined ? body.easypaisaSales : Number(closing.easypaisaSales);
   const expenses = body.expenses !== undefined ? body.expenses : closing.expenses.map(e => ({
-    description: e.description, amount: Number(e.amount), source: e.source,
+    description: e.description, amount: Number(e.amount), source: e.source, vendorId: e.vendorId || null,
   }));
 
   if (cashSales < 0 || easypaisaSales < 0) throw new AppError('Values cannot be negative.', 400);
@@ -258,6 +276,7 @@ exports.update = async ({ id, body, requestingUser }) => {
   const physicalToBox = totalSales - saleExpenses;
 
   return prisma.$transaction(async (tx) => {
+    await tx.vendorPayment.deleteMany({ where: { closingId: id } });
     await tx.dailyExpense.deleteMany({ where: { closingId: id } });
 
     const result = await tx.dailyClosing.update({
@@ -269,11 +288,29 @@ exports.update = async ({ id, body, requestingUser }) => {
           create: expenses.map(e => ({
             description: e.description, amount: e.amount, source: e.source,
             ownerId: requestingUser.ownerId,
+            ...(e.vendorId ? { vendorId: e.vendorId } : {}),
           })),
         },
       },
       select: DAILY_CLOSING_SELECT,
     });
+
+    const vendorExpenses = expenses.filter(e => e.vendorId);
+    for (const e of vendorExpenses) {
+      await tx.vendorPayment.create({
+        data: {
+          vendorId: e.vendorId,
+          branchId: closing.branchId,
+          amount: e.amount,
+          source: e.source,
+          description: e.description,
+          date: new Date(closing.closingDate),
+          recordedBy: requestingUser.userId,
+          ownerId: requestingUser.ownerId,
+          closingId: id,
+        },
+      });
+    }
 
     const calBox = await tx.calBox.upsert({
       where: { branchId: closing.branchId },
