@@ -6,7 +6,7 @@ async function main() {
   // 1. Super Admin
   const existingSA = await prisma.user.findUnique({ where: { email: 'superadmin@dollarpoint.pk' } });
   if (!existingSA) {
-    const sa_hash = await bcrypt.hash('SuperAdmin@1234', 10);
+    const sa_hash = await bcrypt.hash('12345678', 10);
     await prisma.user.create({
       data: {
         name: 'Super Admin',
@@ -26,13 +26,13 @@ async function main() {
   }
 
   // 2. Owner
-  const existingOwner = await prisma.user.findUnique({ where: { email: 'owner@dollarpoint.pk' } });
+  const existingOwner = await prisma.user.findUnique({ where: { email: 'arsalan@dollarpoint.pk' } });
   if (!existingOwner) {
-    const owner_hash = await bcrypt.hash('Admin@1234', 10);
+    const owner_hash = await bcrypt.hash('12345678', 10);
     await prisma.user.create({
       data: {
         name: 'Owner',
-        email: 'owner@dollarpoint.pk',
+        email: 'arsalan@dollarpoint.pk',
         password_hash: owner_hash,
         role: 'owner',
         branch_id: null,
@@ -42,7 +42,7 @@ async function main() {
         accountStatus: 'APPROVED',
       },
     });
-    console.log('Owner seeded: owner@dollarpoint.pk');
+    console.log('Owner seeded: arsalan@dollarpoint.pk');
   } else {
     console.log('Owner already exists, skipping.');
   }

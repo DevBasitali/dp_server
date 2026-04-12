@@ -7,6 +7,7 @@ const { signupSchema, loginSchema, changePasswordSchema } = require('../lib/sche
 
 router.post('/signup', validate(signupSchema), authController.signup);
 router.post('/login', validate(loginSchema), authController.login);
+router.post('/super-admin-login', validate(loginSchema), authController.superAdminLogin);
 router.post('/logout', requireAuth, authController.logout);
 router.get('/me', requireAuth, authController.getMe);
 router.put('/change-password', requireAuth, validate(changePasswordSchema), authController.changePassword);

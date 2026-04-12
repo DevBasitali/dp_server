@@ -31,42 +31,23 @@ exports.signup = async ({ name, email, password }) => {
 };
 
 exports.login = async (email, password) => {
+  const GENERIC = 'Invalid email or password.';
+
   const user = await prisma.user.findUnique({
     where: { email },
     include: { branch: true, vendor: true },
   });
 
-  // Generic message — don't reveal whether the email exists
-  if (!user || !user.is_active) {
-    throw new AppError('Invalid credentials', 401);
-  }
+  if (!user || !user.is_active) throw new AppError(GENERIC, 401);
+
+  // Super admins must use their own portal — reveal nothing here
+  if (user.role === 'super_admin') throw new AppError(GENERIC, 401);
 
   const valid = await bcrypt.compare(password, user.password_hash);
-  if (!valid) {
-    throw new AppError('Invalid credentials', 401);
-  }
+  if (!valid) throw new AppError(GENERIC, 401);
 
-  // super_admin: only block if BANNED, never PENDING
-  if (user.role === 'super_admin') {
-    if (user.accountStatus === 'BANNED') {
-      throw new AppError('Your account has been banned. Please contact support.', 403);
-    }
-    const token = jwt.sign(
-      { userId: user.id, role: 'super_admin', branchId: null, vendorId: null, ownerId: null },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    );
-    const { password_hash, ...safeUser } = user;
-    return { user: safeUser, token };
-  }
-
-  if (user.accountStatus === 'PENDING') {
-    throw new AppError('Your account is awaiting approval. Please check back later.', 403);
-  }
-
-  if (user.accountStatus === 'BANNED') {
-    throw new AppError('Your account has been banned. Please contact support.', 403);
-  }
+  if (user.accountStatus === 'PENDING') throw new AppError(GENERIC, 401);
+  if (user.accountStatus === 'BANNED') throw new AppError(GENERIC, 401);
 
   // For branch_manager / vendor: check their owner is not banned
   if (user.role === 'branch_manager' || user.role === 'vendor') {
@@ -78,9 +59,7 @@ exports.login = async (email, password) => {
       const vendor = await prisma.vendor.findUnique({ where: { id: user.vendor_id } });
       if (vendor) ownerRecord = await prisma.user.findUnique({ where: { id: vendor.ownerId } });
     }
-    if (ownerRecord && ownerRecord.accountStatus === 'BANNED') {
-      throw new AppError('Your account has been suspended. Contact your administrator.', 403);
-    }
+    if (ownerRecord && ownerRecord.accountStatus === 'BANNED') throw new AppError(GENERIC, 401);
   }
 
   // Resolve ownerId based on role
@@ -105,6 +84,33 @@ exports.login = async (email, password) => {
 
   const { password_hash, ...safeUser } = user;
   return { user: safeUser, token };
+};
+
+exports.superAdminLogin = async ({ email, password }) => {
+  const user = await prisma.user.findUnique({ where: { email } });
+
+  if (!user || !user.is_active) {
+    throw new AppError('Invalid credentials.', 401);
+  }
+
+  if (user.role !== 'super_admin') {
+    throw new AppError('These credentials are not for the Super Admin portal.', 403);
+  }
+
+  if (user.accountStatus === 'BANNED') {
+    throw new AppError('This account has been banned.', 403);
+  }
+
+  const valid = await bcrypt.compare(password, user.password_hash);
+  if (!valid) throw new AppError('Invalid credentials.', 401);
+
+  const token = jwt.sign(
+    { userId: user.id, role: user.role, ownerId: null, branchId: null, vendorId: null },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+  );
+
+  return { token, user: { id: user.id, name: user.name, role: user.role } };
 };
 
 exports.getMe = async (userId) => {

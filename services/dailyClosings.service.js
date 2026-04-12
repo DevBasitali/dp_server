@@ -12,6 +12,12 @@ const DAILY_CLOSING_SELECT = {
   physicalToBox: true,
   notes: true,
   createdAt: true,
+  branch: {
+    select: { id: true, name: true },
+  },
+  enterer: {
+    select: { id: true, name: true },
+  },
   expenses: {
     select: { id: true, description: true, amount: true, source: true, createdAt: true },
   },

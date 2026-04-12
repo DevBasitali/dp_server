@@ -42,6 +42,15 @@ exports.changePassword = async (req, res, next) => {
   }
 };
 
+exports.superAdminLogin = async (req, res, next) => {
+  try {
+    const result = await authService.superAdminLogin(req.body);
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+};
+
 exports.logout = (req, res) => {
   const token = req.headers.authorization.split(' ')[1];
   authService.logout(token);
