@@ -8,10 +8,26 @@ if (!process.env.JWT_SECRET) {
 const express = require('express');
 const cors = require('cors');
 
+const AppError = require('./lib/errors');
+
 const app = express();
 
 // Middlewares
-app.use(cors());
+const allowedOrigins = [
+  'http://localhost:3000',
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new AppError('Not allowed by CORS', 403));
+    }
+  },
+  credentials: true
+}));
 app.use(express.json());
 
 // Routes
