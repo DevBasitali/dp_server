@@ -31,10 +31,10 @@ exports.uploadImage = (fileBuffer, folder) => {
  * @param {string} folder
  * @returns {Promise<string>} secure_url
  */
-exports.uploadPDF = (pdfBuffer, folder) => {
+exports.uploadPDF = (pdfBuffer, folder, public_id) => {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
-      { folder, resource_type: 'raw', format: 'pdf' },
+      { folder, resource_type: 'raw', format: 'pdf', public_id },
       (error, result) => {
         if (error) return reject(error);
         resolve(result.secure_url);
@@ -42,4 +42,32 @@ exports.uploadPDF = (pdfBuffer, folder) => {
     );
     stream.end(pdfBuffer);
   });
+};
+
+/**
+ * Delete a file from Cloudinary by its URL
+ * @param {string} url - The Cloudinary secure_url
+ * @param {string} resource_type - 'image' or 'raw'
+ */
+exports.deleteFile = async (url, resource_type = 'image') => {
+  if (!url) return;
+  try {
+    const urlParts = url.split('/');
+    const uploadIndex = urlParts.indexOf('upload');
+    if (uploadIndex === -1) return;
+    
+    let publicId = urlParts.slice(uploadIndex + 2).join('/');
+    
+    // For images, Cloudinary public_id usually omits the file extension.
+    if (resource_type === 'image') {
+      const lastDotIndex = publicId.lastIndexOf('.');
+      if (lastDotIndex !== -1) {
+        publicId = publicId.substring(0, lastDotIndex);
+      }
+    }
+    
+    await cloudinary.uploader.destroy(publicId, { resource_type });
+  } catch (err) {
+    console.error(`Failed to delete Cloudinary file [${url}]:`, err.message);
+  }
 };

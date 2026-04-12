@@ -25,4 +25,17 @@ router.get(
   vendorOrdersController.getOrder
 );
 
+router.get(
+  '/:id/download',
+  requireRole(['owner', 'branch_manager', 'vendor']),
+  vendorOrdersController.downloadOrderPDF
+);
+
+router.put(
+  '/:id',
+  requireRole(['owner', 'branch_manager']),
+  uploadOrderImages,
+  vendorOrdersController.updateOrder
+);
+
 module.exports = router;

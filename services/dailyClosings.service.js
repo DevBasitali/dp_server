@@ -137,7 +137,27 @@ exports.list = async ({ requestingUser, query }) => {
 
   return prisma.dailyClosing.findMany({
     where,
-    select: DAILY_CLOSING_SELECT,
+    select: {
+      id: true,
+      closingDate: true,
+      cashSales: true,
+      easypaisaSales: true,
+      registerTotal: true,
+      physicalToBox: true,
+      notes: true,
+      branch: {
+        select: {
+          id: true,
+          name: true
+        }
+      },
+      enterer: {
+        select: {
+          id: true,
+          name: true
+        }
+      }
+    },
     orderBy: { closingDate: 'desc' },
   });
 };
