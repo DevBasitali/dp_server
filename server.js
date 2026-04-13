@@ -43,6 +43,7 @@ const dailyClosingsRoutes = require('./routes/dailyClosings');
 const monthlyClosingsRoutes = require('./routes/monthlyClosings');
 const calBoxRoutes = require('./routes/calBox');
 const vendorLedgerRoutes = require('./routes/vendorLedger');
+const dashboardRoutes = require('./routes/dashboard');
 
 const { requireAuth } = require('./middlewares/auth.middleware');
 const requireSuperAdmin = require('./middlewares/requireSuperAdmin');
@@ -58,6 +59,7 @@ app.use('/api/v1/daily-closings', dailyClosingsRoutes);
 app.use('/api/v1/monthly-closings', monthlyClosingsRoutes);
 app.use('/api/v1/cal-box', calBoxRoutes);
 app.use('/api/v1/vendor-ledger', vendorLedgerRoutes);
+app.use('/api/v1/dashboard', requireAuth, dashboardRoutes);
 
 // Health check
 app.get('/', (req, res) => {
