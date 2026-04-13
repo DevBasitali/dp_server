@@ -7,7 +7,7 @@ const { createBranchSchema, updateBranchSchema } = require('../lib/schemas/branc
 
 router.use(requireAuth);
 
-router.get('/', requireRole(['owner']), branchController.listBranches);
+router.get('/', requireRole(['owner', 'branch_manager']), branchController.listBranches);
 router.post('/', requireRole(['owner']), validate(createBranchSchema), branchController.createBranch);
 router.get('/:id', requireRole(['owner', 'branch_manager']), branchController.getBranch);
 router.put('/:id', requireRole(['owner']), validate(updateBranchSchema), branchController.updateBranch);

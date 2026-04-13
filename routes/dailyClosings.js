@@ -15,5 +15,6 @@ router.get('/summary', requireRole(['owner', 'branch_manager']), dailyClosingsCo
 router.get('/', requireRole(['owner', 'branch_manager']), dailyClosingsController.list);
 
 router.put('/:id', requireRole(['owner', 'branch_manager']), validate(updateDailyClosingSchema), dailyClosingsController.update);
+router.delete('/:id', requireRole(['owner', 'branch_manager']), dailyClosingsController.deleteClosing);
 
 module.exports = router;

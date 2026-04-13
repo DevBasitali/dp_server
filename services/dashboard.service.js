@@ -12,6 +12,13 @@ exports.getOwnerDashboard = async ({ requestingUser }) => {
   const currentMonth = now.getUTCMonth() + 1;
   const currentYear = now.getUTCFullYear();
 
+  // Range covering the full UTC day — avoids exact-match timezone mismatches
+  const todayStart = new Date(todayStr + 'T00:00:00.000Z');
+  const tomorrowStart = new Date(todayStr + 'T00:00:00.000Z');
+  tomorrowStart.setUTCDate(tomorrowStart.getUTCDate() + 1);
+
+  console.log('Dashboard date range — today:', todayStart.toISOString(), '→ tomorrow:', tomorrowStart.toISOString());
+
   const monthStart = new Date(Date.UTC(currentYear, currentMonth - 1, 1));
   const monthEnd = new Date(Date.UTC(currentYear, currentMonth, 1));
 
@@ -20,10 +27,11 @@ exports.getOwnerDashboard = async ({ requestingUser }) => {
     totalBilledResult,
     totalPaidResult,
     totalPaidThisMonthResult,
-    todaysSalesResult,
     activeBranchesCount,
     branches,
     vendors,
+    rawTodaySales,
+    rawBranchToday,
   ] = await Promise.all([
     // Sum of all vendor inventory (billed)
     prisma.vendorInventory.aggregate({
@@ -46,15 +54,6 @@ exports.getOwnerDashboard = async ({ requestingUser }) => {
       _sum: { amount: true },
     }),
 
-    // Today's sales across all branches
-    prisma.dailyClosing.aggregate({
-      where: {
-        ownerId,
-        closingDate: new Date(todayStr),
-      },
-      _sum: { cashSales: true, easypaisaSales: true },
-    }),
-
     // Active branches count
     prisma.branch.count({
       where: { ownerId, is_active: true },
@@ -73,7 +72,31 @@ exports.getOwnerDashboard = async ({ requestingUser }) => {
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
     }),
+
+    // Raw SQL: today's total sales — uses DB CURRENT_DATE to bypass timezone issues
+    prisma.$queryRaw`
+      SELECT SUM("cashSales" + "easypaisaSales") as total,
+             "closingDate"::date as closing_day,
+             CURRENT_DATE as today
+      FROM "DailyClosing"
+      WHERE "ownerId" = ${ownerId}::uuid
+        AND "closingDate"::date = CURRENT_DATE
+      GROUP BY "closingDate"::date
+    `,
+
+    // Raw SQL: today's sales per branch
+    prisma.$queryRaw`
+      SELECT "branchId",
+             SUM("cashSales" + "easypaisaSales") as today_sales
+      FROM "DailyClosing"
+      WHERE "ownerId" = ${ownerId}::uuid
+        AND "closingDate"::date = CURRENT_DATE
+      GROUP BY "branchId"
+    `,
   ]);
+
+  console.log('Raw SQL today sales:', rawTodaySales);
+  console.log('Branch today sales:', rawBranchToday);
 
   // Stats
   const totalBilled = Number(totalBilledResult._sum.amount ?? 0);
@@ -82,18 +105,17 @@ exports.getOwnerDashboard = async ({ requestingUser }) => {
 
   const totalPaidThisMonth = Number(totalPaidThisMonthResult._sum.amount ?? 0);
 
-  const todaysCash = Number(todaysSalesResult._sum.cashSales ?? 0);
-  const todaysEasypaisa = Number(todaysSalesResult._sum.easypaisaSales ?? 0);
-  const todaysSales = todaysCash + todaysEasypaisa;
+  const todaysSales = rawTodaySales[0]?.total ? Number(rawTodaySales[0].total) : 0;
+
+  // Map branchId → today's sales from the bulk raw query
+  const branchTodayMap = new Map(
+    rawBranchToday.map(r => [r.branchId, Number(r.today_sales)])
+  );
 
   // Branch sales overview — fetch per-branch data in parallel
   const branchSalesOverview = await Promise.all(
     branches.map(async (branch) => {
-      const [todayClosing, monthClosings, monthlyClosing] = await Promise.all([
-        prisma.dailyClosing.findUnique({
-          where: { branchId_closingDate: { branchId: branch.id, closingDate: new Date(todayStr) } },
-          select: { cashSales: true, easypaisaSales: true },
-        }),
+      const [monthClosings, monthlyClosing] = await Promise.all([
         prisma.dailyClosing.aggregate({
           where: {
             ownerId,
@@ -108,13 +130,9 @@ exports.getOwnerDashboard = async ({ requestingUser }) => {
         }),
       ]);
 
-      const todayCash = Number(todayClosing?.cashSales ?? 0);
-      const todayEP = Number(todayClosing?.easypaisaSales ?? 0);
-      const todaySales = todayCash + todayEP;
+      const todaySales = branchTodayMap.get(branch.id) ?? 0;
 
-      const monthCash = Number(monthClosings._sum.cashSales ?? 0);
-      const monthEP = Number(monthClosings._sum.easypaisaSales ?? 0);
-      const thisMonthSales = monthCash + monthEP;
+      const thisMonthSales = Number(monthClosings._sum.cashSales ?? 0) + Number(monthClosings._sum.easypaisaSales ?? 0);
 
       return {
         branchId: branch.id,

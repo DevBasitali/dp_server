@@ -7,15 +7,20 @@ exports.getLedger = async ({ vendorId, requestingUser }) => {
   }
 
   const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
+  const branchFilter = requestingUser.role === 'branch_manager' ? { branchId: requestingUser.branchId } : {};
+
   const vendor = await prisma.vendor.findUnique({
     where: { id: vendorId, ...ownerFilter },
     select: { id: true, name: true, whatsapp_number: true, category: true },
   });
   if (!vendor) throw new AppError('Vendor not found', 404);
 
+  const inventoryWhere = { vendorId, ...ownerFilter, ...branchFilter };
+  const paymentWhere = { vendorId, ...ownerFilter, ...branchFilter };
+
   const [inventories, payments] = await Promise.all([
     prisma.vendorInventory.findMany({
-      where: { vendorId, ...ownerFilter },
+      where: inventoryWhere,
       select: {
         id: true, date: true, description: true, amount: true, createdAt: true,
         branch: { select: { id: true, name: true } },
@@ -24,7 +29,7 @@ exports.getLedger = async ({ vendorId, requestingUser }) => {
       orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
     }),
     prisma.vendorPayment.findMany({
-      where: { vendorId, ...ownerFilter },
+      where: paymentWhere,
       select: {
         id: true, date: true, description: true, amount: true, source: true, createdAt: true,
         branch: { select: { id: true, name: true } },

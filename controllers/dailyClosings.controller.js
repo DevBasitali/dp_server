@@ -48,3 +48,15 @@ exports.update = async (req, res, next) => {
     next(err);
   }
 };
+
+exports.deleteClosing = async (req, res, next) => {
+  try {
+    await dailyClosingsService.deleteClosing({
+      id: req.params.id,
+      requestingUser: req.user,
+    });
+    res.json({ success: true, message: 'Daily closing deleted successfully.' });
+  } catch (err) {
+    next(err);
+  }
+};

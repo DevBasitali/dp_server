@@ -36,8 +36,10 @@ exports.create = async ({ body, requestingUser }) => {
 
   if (!branchId) throw new AppError('branchId is required', 400);
 
-  const dateStr = closingDate || new Date().toISOString().slice(0, 10);
-  const parsedDate = new Date(dateStr);
+  // Slice to date-only then force UTC midnight — prevents Pakistan timezone offset
+  // from pushing the stored timestamp into the previous UTC day
+  const dateStr = (closingDate ? String(closingDate).slice(0, 10) : new Date().toISOString().slice(0, 10));
+  const parsedDate = new Date(dateStr + 'T00:00:00.000Z');
 
   if (cashSales < 0 || easypaisaSales < 0) throw new AppError('Values cannot be negative.', 400);
 
@@ -163,6 +165,7 @@ exports.list = async ({ requestingUser, query }) => {
       registerTotal: true,
       physicalToBox: true,
       notes: true,
+      enteredBy: true,
       branch: {
         select: {
           id: true,
@@ -335,5 +338,68 @@ exports.update = async ({ id, body, requestingUser }) => {
     });
 
     return result;
+  });
+};
+
+exports.deleteClosing = async ({ id, requestingUser }) => {
+  const ownerFilter = requestingUser.isSuperAdmin ? {} : { ownerId: requestingUser.ownerId };
+
+  const closing = await prisma.dailyClosing.findUnique({
+    where: { id, ...ownerFilter },
+    select: {
+      id: true,
+      branchId: true,
+      enteredBy: true,
+      closingDate: true,
+      physicalToBox: true,
+      expenses: { select: { id: true, amount: true, source: true } },
+    },
+  });
+
+  if (!closing) throw new AppError('Daily closing not found', 404);
+
+  if (requestingUser.role === 'branch_manager' && closing.enteredBy !== requestingUser.userId) {
+    throw new AppError('You can only delete your own entries.', 403);
+  }
+
+  const closingDate = new Date(closing.closingDate);
+  const month = closingDate.getUTCMonth() + 1;
+  const year = closingDate.getUTCFullYear();
+  const lockedMonth = await prisma.monthlyClosing.findUnique({
+    where: { branchId_month_year: { branchId: closing.branchId, month, year } },
+    select: { isLocked: true },
+  });
+  if (lockedMonth?.isLocked) {
+    throw new AppError('Cannot delete — this month is already closed.', 409);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.vendorPayment.deleteMany({ where: { closingId: id } });
+    await tx.dailyExpense.deleteMany({ where: { closingId: id } });
+
+    const calExpenses = closing.expenses
+      .filter(e => e.source === 'CAL')
+      .reduce((sum, e) => sum + Number(e.amount), 0);
+
+    const calBox = await tx.calBox.findUnique({ where: { branchId: closing.branchId } });
+    if (calBox) {
+      await tx.calBox.update({
+        where: { branchId: closing.branchId },
+        data: { balance: Number(calBox.balance) - Number(closing.physicalToBox) + calExpenses },
+      });
+    }
+
+    await tx.dailyClosing.delete({ where: { id } });
+
+    await tx.auditLog.create({
+      data: {
+        user_id: requestingUser.userId,
+        action: 'DAILY_CLOSING_DELETED',
+        entity_type: 'daily_closing',
+        entity_id: id,
+        description: `Daily closing deleted for branch ${closing.branchId} on ${closing.closingDate}`,
+        ownerId: requestingUser.ownerId,
+      },
+    });
   });
 };
