@@ -7,7 +7,7 @@ const { createMonthlyClosingSchema } = require('../lib/schemas/monthlyClosing.sc
 
 router.use(requireAuth);
 
-router.post('/', requireRole(['branch_manager']), validate(createMonthlyClosingSchema), monthlyClosingsController.create);
+router.post('/', requireRole(['owner', 'branch_manager']), validate(createMonthlyClosingSchema), monthlyClosingsController.create);
 
 router.get('/', requireRole(['owner', 'branch_manager']), monthlyClosingsController.list);
 

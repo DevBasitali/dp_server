@@ -9,9 +9,18 @@ const MONTHLY_CLOSING_SELECT = {
   daysRecorded: true, isLocked: true, closedAt: true, createdAt: true,
 };
 
+const MONTHLY_CLOSING_LIST_SELECT = {
+  ...MONTHLY_CLOSING_SELECT,
+  branch: { select: { name: true } },
+};
+
 exports.create = async ({ body, requestingUser }) => {
   const { month, year } = body;
-  const branchId = requestingUser.branchId;
+
+  // branch_manager uses their token branchId; owner must supply branchId in body
+  const branchId = requestingUser.role === 'branch_manager'
+    ? requestingUser.branchId
+    : body.branchId;
 
   if (!branchId) throw new AppError('branchId is required', 400);
 
@@ -90,12 +99,85 @@ exports.list = async ({ requestingUser, query }) => {
   }
 
   if (query.year) where.year = parseInt(query.year, 10);
+  if (query.month) where.month = parseInt(query.month, 10);
 
-  return prisma.monthlyClosing.findMany({
+  const closings = await prisma.monthlyClosing.findMany({
     where,
-    select: MONTHLY_CLOSING_SELECT,
+    select: MONTHLY_CLOSING_LIST_SELECT,
     orderBy: [{ year: 'desc' }, { month: 'desc' }],
   });
+
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+  const startDate = new Date(currentYear, currentMonth - 1, 1);
+  const endDate = new Date(currentYear, currentMonth, 1);
+
+  if (requestingUser.role === 'branch_manager') {
+    const branchId = requestingUser.branchId;
+    const currentClosing = closings.find(c => c.month === currentMonth && c.year === currentYear);
+
+    let branchStatus;
+    if (currentClosing) {
+      branchStatus = {
+        branchId,
+        status: 'CLOSED',
+        dailyCount: currentClosing.daysRecorded,
+        bachat: Number(currentClosing.netBachat),
+      };
+    } else {
+      const dailyCount = await prisma.dailyClosing.count({
+        where: { branchId, ...ownerFilter, closingDate: { gte: startDate, lt: endDate } },
+      });
+      branchStatus = { branchId, status: 'PENDING', dailyCount, bachat: null };
+    }
+
+    return {
+      closings,
+      currentMonth: { month: currentMonth, year: currentYear, branches: [branchStatus] },
+    };
+  }
+
+  // Owner / super admin
+  const branches = await prisma.branch.findMany({
+    where: { ...ownerFilter, is_active: true },
+    select: { id: true, name: true },
+  });
+
+  const branchStatuses = await Promise.all(branches.map(async (branch) => {
+    const currentClosing = closings.find(
+      c => c.branchId === branch.id && c.month === currentMonth && c.year === currentYear
+    );
+
+    if (currentClosing) {
+      return {
+        branchId: branch.id,
+        branchName: branch.name,
+        status: 'CLOSED',
+        dailyCount: currentClosing.daysRecorded,
+        bachat: Number(currentClosing.netBachat),
+        totalSales: Number(currentClosing.totalSales),
+      };
+    }
+
+    const dailyCount = await prisma.dailyClosing.count({
+      where: { branchId: branch.id, ...ownerFilter, closingDate: { gte: startDate, lt: endDate } },
+    });
+
+    return {
+      branchId: branch.id,
+      branchName: branch.name,
+      status: 'PENDING',
+      dailyCount,
+      bachat: null,
+      totalSales: null,
+    };
+  }));
+
+  return {
+    closings,
+    currentMonth: { month: currentMonth, year: currentYear, branches: branchStatuses },
+  };
 };
 
 exports.getById = async ({ id, requestingUser }) => {

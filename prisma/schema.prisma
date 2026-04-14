@@ -60,6 +60,7 @@ model User {
   owned_vendor_inventories   VendorInventory[]  @relation("OwnedVendorInventories")
   owned_vendor_payments      VendorPayment[]    @relation("OwnedVendorPayments")
   owned_audit_logs           AuditLog[]         @relation("OwnedAuditLogs")
+  owned_settings             SystemSetting[]    @relation("OwnedSettings")
 }
 
 model Branch {
@@ -413,4 +414,16 @@ model VendorPayment {
   branch      Branch        @relation(fields: [branchId], references: [id])
   recorder    User          @relation("VendorPaymentRecorder", fields: [recordedBy], references: [id])
   closing     DailyClosing? @relation(fields: [closingId], references: [id])
+}
+
+model SystemSetting {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @db.VarChar(100)
+  value     String   @db.Text
+  ownerId   String   @db.Uuid
+  updatedAt DateTime @updatedAt
+
+  owner     User     @relation("OwnedSettings", fields: [ownerId], references: [id])
+
+  @@unique([key, ownerId])
 }
