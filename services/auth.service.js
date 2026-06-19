@@ -40,8 +40,7 @@ exports.login = async (email, password) => {
 
   if (!user || !user.is_active) throw new AppError(GENERIC, 401);
 
-  // Super admins must use their own portal — reveal nothing here
-  if (user.role === 'super_admin') throw new AppError(GENERIC, 401);
+
 
   const valid = await bcrypt.compare(password, user.password_hash);
   if (!valid) throw new AppError(GENERIC, 401);
@@ -63,8 +62,10 @@ exports.login = async (email, password) => {
   }
 
   // Resolve ownerId based on role
-  let ownerId;
-  if (user.role === 'owner') {
+  let ownerId = null;
+  if (user.role === 'super_admin') {
+    ownerId = null;
+  } else if (user.role === 'owner') {
     ownerId = user.id;
   } else if (user.role === 'branch_manager') {
     const branch = await prisma.branch.findUnique({ where: { id: user.branch_id } });
